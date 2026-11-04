@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "TecTic Bd – Smart Group Publisher",
+  "version": "1.0.0",
+  "description": "Automated promotional post publisher and scheduler across Facebook Groups for TecTic Bd.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.facebook.com/*",
+    "https://facebook.com/*",
+    "http://localhost/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TecTic Bd – Group Publisher"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.facebook.com/groups/*", "https://facebook.com/groups/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://localhost:3000/*", "https://*.run.app/*"],
+      "js": ["messaging.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

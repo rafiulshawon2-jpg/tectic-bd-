@@ -1,0 +1,6 @@
+{
+  "name": "TecTic Bd – Smart Group Publisher",
+  "description": "Centralized promotional campaign manager and Facebook Group auto-publisher with smart scheduling and Chrome Extension integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
