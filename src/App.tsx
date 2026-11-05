@@ -9,6 +9,9 @@ import { QueueManagerView } from './components/QueueManagerView';
 import { HistoryReportsView } from './components/HistoryReportsView';
 import { ExtensionHubView } from './components/ExtensionHubView';
 import { SettingsView } from './components/SettingsView';
+import { MetaAccountsView } from './components/MetaAccountsView';
+import { GroupModerationTrackerView } from './components/GroupModerationTrackerView';
+import { WorkerControlPanelView } from './components/WorkerControlPanelView';
 import { storageService } from './services/storage';
 import { queueRunner, QueueRunnerStatus } from './services/queueRunner';
 import {
@@ -17,6 +20,8 @@ import {
   PublishingTask,
   ActivityLog,
   AppSettings,
+  MetaAccount,
+  GroupNotification,
 } from './types';
 
 export default function App() {
@@ -26,6 +31,8 @@ export default function App() {
   const [tasks, setTasks] = useState<PublishingTask[]>(storageService.getTasks());
   const [logs, setLogs] = useState<ActivityLog[]>(storageService.getLogs());
   const [settings, setSettings] = useState<AppSettings>(storageService.getSettings());
+  const [accounts, setAccounts] = useState<MetaAccount[]>(storageService.getAccounts());
+  const [notifications, setNotifications] = useState<GroupNotification[]>(storageService.getNotifications());
   const [queueStatus, setQueueStatus] = useState<QueueRunnerStatus>(queueRunner.getStatus());
 
   // Subscribe to storage updates
@@ -36,6 +43,8 @@ export default function App() {
       setTasks(storageService.getTasks());
       setLogs(storageService.getLogs());
       setSettings(storageService.getSettings());
+      setAccounts(storageService.getAccounts());
+      setNotifications(storageService.getNotifications());
     });
 
     const unsubscribeQueue = queueRunner.subscribe((status) => {
@@ -56,6 +65,8 @@ export default function App() {
     switch (tab) {
       case 'dashboard':
         return 'Operational Dashboard';
+      case 'accounts':
+        return 'Connected Meta Accounts (FB & Instagram)';
       case 'groups':
         return 'Facebook Group Directory';
       case 'composer':
@@ -64,6 +75,10 @@ export default function App() {
         return 'Campaign Manager';
       case 'queue':
         return 'Live Publishing Queue';
+      case 'moderation':
+        return 'Group Post Approvals & Alerts Monitor';
+      case 'worker':
+        return 'Automation Worker Engine (Local Windows & Cloud VPS)';
       case 'history':
         return 'Posting History & Reports';
       case 'extension':
@@ -79,6 +94,9 @@ export default function App() {
     (t) => t.status === 'Scheduled' || t.status === 'Processing'
   ).length;
 
+  const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
+  const defaultAccount = accounts.find((a) => a.isDefault) || accounts[0];
+
   return (
     <div className="flex h-screen bg-[#F3F6FB] overflow-hidden">
       {/* Permanent Left Sidebar */}
@@ -89,6 +107,9 @@ export default function App() {
         totalGroupsCount={groups.length}
         isExtensionConnected={queueStatus.isExtensionConnected}
         settings={settings}
+        unreadNotificationsCount={unreadNotificationsCount}
+        connectedAccountsCount={accounts.length}
+        defaultAccount={defaultAccount}
       />
 
       {/* Main Content Area */}
@@ -99,6 +120,9 @@ export default function App() {
           onNewCampaign={() => setActiveTab('composer')}
           isExtensionConnected={queueStatus.isExtensionConnected}
           isSimulatedExtension={settings.simulatedExtension}
+          defaultAccount={defaultAccount}
+          unreadNotificationsCount={unreadNotificationsCount}
+          onNavigate={setActiveTab}
         />
 
         {/* Dynamic Viewport */}
@@ -111,8 +135,17 @@ export default function App() {
               logs={logs}
               settings={settings}
               isExtensionConnected={queueStatus.isExtensionConnected}
+              accounts={accounts}
+              notifications={notifications}
               onNavigate={setActiveTab}
               onRunTaskNow={handleRunTaskNow}
+            />
+          )}
+
+          {activeTab === 'accounts' && (
+            <MetaAccountsView
+              accounts={accounts}
+              timeZone={settings.defaultTimezone}
             />
           )}
 
@@ -146,6 +179,22 @@ export default function App() {
               timeZone={settings.defaultTimezone}
               onRunTaskNow={handleRunTaskNow}
               activeProcessingTaskId={queueStatus.activeProcessingTaskId}
+            />
+          )}
+
+          {activeTab === 'moderation' && (
+            <GroupModerationTrackerView
+              notifications={notifications}
+              tasks={tasks}
+              timeZone={settings.defaultTimezone}
+            />
+          )}
+
+          {activeTab === 'worker' && (
+            <WorkerControlPanelView
+              settings={settings}
+              timeZone={settings.defaultTimezone}
+              logs={logs}
             />
           )}
 

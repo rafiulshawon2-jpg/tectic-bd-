@@ -1,0 +1,22 @@
+{
+  "name": "tecticbd-automation-worker",
+  "version": "1.2.0",
+  "description": "TecTic Bd - Persistent Local Windows and Cloud VPS Automation Worker for Facebook Groups",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js",
+    "dev": "node worker.js"
+  },
+  "keywords": [
+    "facebook-group-publisher",
+    "puppeteer",
+    "tectic-bd",
+    "automation-worker"
+  ],
+  "author": "TecTic Bd Engineering",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "express": "^4.21.2",
+    "puppeteer-core": "^22.15.0"
+  }
+}

@@ -1,5 +1,5 @@
 (function () {
-  console.log('[TecTic Bd] Facebook Automation Script Loaded on:', window.location.href);
+  console.log('[TecTic Bd] Facebook Automation & Notification Inspector Loaded on:', window.location.href);
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'INJECT_POST') {
@@ -8,17 +8,24 @@
         .catch((err) => sendResponse({ success: false, error: err.message }));
       return true;
     }
+
+    if (request.action === 'INSPECT_GROUP_NOTIFICATIONS') {
+      inspectGroupNotifications()
+        .then((notifications) => sendResponse({ success: true, notifications }))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
   });
 
   async function performGroupPublish(postData) {
-    console.log('[TecTic Bd] Preparing to publish post to group:', postData);
+    console.log('[TecTic Bd] Publishing via connected Meta ID:', postData);
 
     const composerTrigger = document.querySelector(
       'div[role="button"][tabindex="0"] span:has-text("Write something..."), div[aria-label*="Create a public post"], div[aria-label*="Write something"]'
     ) || document.querySelector('div[role="button"][tabindex="0"]');
 
     if (!composerTrigger) {
-      throw new Error('Could not find Facebook group post composer box. Please verify you are logged in and a member of this group.');
+      throw new Error('Facebook group composer box not found. Ensure you are logged into your connected Meta account.');
     }
 
     composerTrigger.click();
@@ -46,6 +53,36 @@
       timestamp: new Date().toISOString(),
       url: window.location.href
     };
+  }
+
+  async function inspectGroupNotifications() {
+    const notifItems = Array.from(document.querySelectorAll('div[data-pagelet*="Notification"], div[role="feed"] div[role="article"]'));
+    const detected = [];
+
+    notifItems.forEach((el) => {
+      const text = el.textContent || '';
+      if (text.includes('approved your post') || text.includes('approved') || text.includes('is now active')) {
+        detected.push({
+          type: 'live_approved',
+          text,
+          timestamp: new Date().toISOString()
+        });
+      } else if (text.includes('declined your post') || text.includes('removed your post') || text.includes('deleted')) {
+        detected.push({
+          type: 'declined',
+          text,
+          timestamp: new Date().toISOString()
+        });
+      } else if (text.includes('pending approval') || text.includes('submitted for review')) {
+        detected.push({
+          type: 'pending_approval',
+          text,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
+    return detected;
   }
 
   function wait(ms) {

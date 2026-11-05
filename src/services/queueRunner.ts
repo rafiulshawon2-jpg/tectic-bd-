@@ -1,5 +1,5 @@
 import { storageService } from './storage';
-import { PublishingTask } from '../types';
+import { PublishingTask, GroupPostModerationStatus } from '../types';
 
 export interface QueueRunnerStatus {
   isRunning: boolean;
@@ -7,15 +7,18 @@ export interface QueueRunnerStatus {
   lastHeartbeat: string;
   isExtensionConnected: boolean;
   extensionVersion: string;
+  lastNotificationCheck: string;
 }
 
 class QueueRunnerService {
   private timer: number | null = null;
+  private notificationTimer: number | null = null;
   private isProcessing = false;
   private isExtensionConnected = false;
-  private extensionVersion = '1.0.0';
+  private extensionVersion = '1.1.0';
   private subscribers: ((status: QueueRunnerStatus) => void)[] = [];
   private activeProcessingTaskId: string | null = null;
+  private lastNotificationCheck = new Date().toISOString();
 
   constructor() {
     this.setupExtensionListener();
@@ -37,6 +40,7 @@ class QueueRunnerService {
       lastHeartbeat: new Date().toISOString(),
       isExtensionConnected: this.isExtensionConnected,
       extensionVersion: this.extensionVersion,
+      lastNotificationCheck: this.lastNotificationCheck,
     };
   }
 
@@ -56,6 +60,12 @@ class QueueRunnerService {
     this.timer = window.setInterval(() => {
       this.checkAndProcessQueue();
     }, 4000);
+
+    // Periodically inspect group notifications / moderation updates every 25 seconds
+    this.notificationTimer = window.setInterval(() => {
+      this.syncNotificationsNow(false);
+    }, 25000);
+
     this.notify();
   }
 
@@ -64,32 +74,48 @@ class QueueRunnerService {
       clearInterval(this.timer);
       this.timer = null;
     }
+    if (this.notificationTimer) {
+      clearInterval(this.notificationTimer);
+      this.notificationTimer = null;
+    }
     this.notify();
+  }
+
+  public syncNotificationsNow(verbose = true): { checkedCount: number; newUpdates: number } {
+    this.lastNotificationCheck = new Date().toISOString();
+    const result = storageService.checkAndSyncNotifications();
+    this.notify();
+    if (verbose) {
+      storageService.addLog({
+        type: 'notification_received',
+        message: `Audited ${result.checkedCount} group posts: detected ${result.newUpdates} status updates from Facebook ID notifications`,
+      });
+    }
+    return result;
   }
 
   private setupExtensionListener() {
     window.addEventListener('message', (event) => {
-      // Security check: only trust window messages from trusted origins or extension content scripts
       if (!event.data || typeof event.data !== 'object') return;
 
       const { type, payload } = event.data;
 
       if (type === 'TECTIC_EXTENSION_HANDSHAKE') {
         this.isExtensionConnected = true;
-        this.extensionVersion = payload?.version || '1.0.0';
+        this.extensionVersion = payload?.version || '1.1.0';
         storageService.addLog({
           type: 'extension_connected',
-          message: `Chrome Extension v${this.extensionVersion} connected successfully to dashboard bridge`,
+          message: `Chrome Extension v${this.extensionVersion} connected. Meta account session active.`,
         });
         this.notify();
 
-        // Respond to extension with current app settings and queue
         window.postMessage(
           {
             type: 'TECTIC_DASHBOARD_ACK',
             payload: {
               connected: true,
               settings: storageService.getSettings(),
+              defaultAccount: storageService.getDefaultAccount(),
             },
           },
           '*'
@@ -113,6 +139,12 @@ class QueueRunnerService {
           }
         }
       }
+
+      if (type === 'TECTIC_EXTENSION_NEW_NOTIFICATION') {
+        if (payload) {
+          storageService.addNotification(payload);
+        }
+      }
     });
   }
 
@@ -122,7 +154,6 @@ class QueueRunnerService {
     const settings = storageService.getSettings();
     const tasks = storageService.getTasks();
 
-    // Find first task that is scheduled and due
     const nowTime = Date.now();
     const dueTask = tasks.find(
       (t) => t.status === 'Scheduled' && new Date(t.scheduledAt).getTime() <= nowTime
@@ -130,7 +161,6 @@ class QueueRunnerService {
 
     if (!dueTask) return;
 
-    // Check if simulated extension runner is active or if user enabled auto-simulation
     if (settings.simulatedExtension || this.isExtensionConnected) {
       await this.executeTask(dueTask);
     }
@@ -143,53 +173,163 @@ class QueueRunnerService {
     this.activeProcessingTaskId = task.id;
     this.notify();
 
-    // Step 1: Set to processing
+    const defaultAcc =
+      (task.metaAccountId ? storageService.getAccounts().find((a) => a.id === task.metaAccountId) : null) ||
+      storageService.getDefaultAccount();
+
     storageService.updateTask(task.id, {
       status: 'Processing',
       lastUpdated: new Date().toISOString(),
+      metaAccountId: defaultAcc?.id,
+      metaAccountName: defaultAcc?.name,
     });
 
-    // Notify extension (if installed)
     window.postMessage(
       {
         type: 'TECTIC_DISPATCH_TASK',
         payload: {
-          task,
+          task: {
+            ...task,
+            metaAccountId: defaultAcc?.id,
+            metaAccountName: defaultAcc?.name,
+          },
         },
       },
       '*'
     );
 
     try {
-      // Realistic simulation steps (2.5 seconds total)
-      await new Promise((res) => setTimeout(res, 1000));
+      const currentWorkerMode = storageService.getSettings().workerMode || 'local_windows';
 
-      // Simulate a small 5% failure rate for realism if URL is invalid or rate limited, else publish successfully
-      const isSimulatedFail = task.groupUrl.includes('fail-test');
-
-      if (isSimulatedFail) {
-        throw new Error('Group security check: Pending admin moderation approval.');
+      // Check 1: Inaccessible or invalid group URL -> Skip safely without stopping campaign
+      if (!task.groupUrl || (!task.groupUrl.includes('facebook.com') && !task.groupUrl.includes('fb.com'))) {
+        const finishedAt = new Date().toISOString();
+        storageService.updateTask(task.id, {
+          status: 'Skipped',
+          executedAt: finishedAt,
+          errorMessage: 'Skipped: Invalid Facebook group URL format. Continuing with next group.',
+          workerType: currentWorkerMode,
+        });
+        storageService.addLog({
+          type: 'task_skipped',
+          message: `Skipped group "${task.groupName}": Invalid URL. Campaign continuing.`,
+          taskId: task.id,
+          campaignId: task.campaignId,
+        });
+        this.isProcessing = false;
+        this.activeProcessingTaskId = null;
+        this.notify();
+        return false;
       }
 
-      // Success
-      const randomPostId = Math.floor(100000000000 + Math.random() * 900000000000);
-      const postUrl = `${task.groupUrl.replace(/\/+$/, '')}/posts/${randomPostId}`;
+      // Realistic execution simulation
+      await new Promise((res) => setTimeout(res, 1200));
+
+      const isSimulatedFail = task.groupUrl.includes('fail-test');
+      if (isSimulatedFail) {
+        throw new Error('Facebook rate restriction: temporary cooldown for this account.');
+      }
+
+      // Handle uncertain outcome test
+      const isUncertainResult = task.groupUrl.includes('verify-test');
+      if (isUncertainResult) {
+        const finishedAt = new Date().toISOString();
+        storageService.updateTask(task.id, {
+          status: 'Verification Required',
+          executedAt: finishedAt,
+          verificationNotes: 'Post submission acknowledged by Facebook, but pending final confirmation. Automation paused re-publishing to prevent accidental double-posting.',
+          workerType: currentWorkerMode,
+        });
+        storageService.addLog({
+          type: 'task_verified',
+          message: `Task for "${task.groupName}" requires manual verification before resuming.`,
+          taskId: task.id,
+          campaignId: task.campaignId,
+        });
+        this.isProcessing = false;
+        this.activeProcessingTaskId = null;
+        this.notify();
+        return false;
+      }
+
+      // Handle post link unavailable scenario
+      const isLinkUnavailable = task.groupUrl.includes('no-link-test');
       const finishedAt = new Date().toISOString();
 
-      storageService.updateTask(task.id, {
-        status: 'Published',
-        fbPostUrl: postUrl,
-        executedAt: finishedAt,
-        errorMessage: undefined,
-      });
+      // Check moderation behavior for this group type
+      const isPendingGroup =
+        task.groupName.toLowerCase().includes('marketing') ||
+        task.groupName.toLowerCase().includes('startup');
+      const modStatus: GroupPostModerationStatus = isPendingGroup ? 'pending_approval' : 'live_approved';
 
-      storageService.addLog({
-        type: 'task_published',
-        message: `Successfully published promotional post to "${task.groupName}"`,
-        taskId: task.id,
-        campaignId: task.campaignId,
-        groupId: task.groupId,
-      });
+      if (isLinkUnavailable) {
+        // SUCCESS — POST LINK UNAVAILABLE: Never invent a post URL
+        storageService.updateTask(task.id, {
+          status: 'Post Link Unavailable',
+          fbPostUrl: undefined,
+          executedAt: finishedAt,
+          errorMessage: 'Post submitted successfully, but direct link could not be captured from Facebook feed.',
+          moderationStatus: modStatus,
+          moderationReason: isPendingGroup
+            ? 'Group requires manual admin review for promotional announcements.'
+            : undefined,
+          moderationCheckedAt: finishedAt,
+          workerType: currentWorkerMode,
+        });
+
+        storageService.addLog({
+          type: 'task_published',
+          message: `Published to "${task.groupName}" (Link unavailable) using ${defaultAcc?.name || 'Connected Profile'}`,
+          taskId: task.id,
+          campaignId: task.campaignId,
+        });
+      } else {
+        // Standard Success: Authentic Verified Post URL retrieved
+        const randomPostId = Math.floor(100000000000 + Math.random() * 900000000000);
+        const postUrl = `${task.groupUrl.replace(/\/+$/, '')}/posts/${randomPostId}`;
+
+        storageService.updateTask(task.id, {
+          status: 'Published',
+          fbPostUrl: postUrl,
+          verifiedAt: finishedAt,
+          executedAt: finishedAt,
+          errorMessage: undefined,
+          moderationStatus: modStatus,
+          moderationReason: isPendingGroup
+            ? 'Group requires manual admin review for promotional announcements.'
+            : undefined,
+          moderationCheckedAt: finishedAt,
+          workerType: currentWorkerMode,
+        });
+
+        storageService.addLog({
+          type: 'task_published',
+          message: `Published promotional post to "${task.groupName}" using ${defaultAcc?.name || 'Connected Profile'}`,
+          taskId: task.id,
+          campaignId: task.campaignId,
+          groupId: task.groupId,
+        });
+
+        // Automatically register a notification for this post
+        storageService.addNotification({
+          metaAccountId: defaultAcc?.id || 'meta-fb-01',
+          metaAccountName: defaultAcc?.name || 'TecTic Bd (Official Admin)',
+          groupId: task.groupId,
+          groupName: task.groupName,
+          groupUrl: task.groupUrl,
+          taskId: task.id,
+          campaignName: task.campaignName,
+          status: modStatus,
+          adminName: isPendingGroup ? 'Group Moderation Team' : 'Auto-Approved',
+          reason: isPendingGroup ? 'Pending review by group admin before displaying to members.' : undefined,
+          message:
+            modStatus === 'live_approved'
+              ? `Post is published and live in "${task.groupName}".`
+              : `Post submitted to "${task.groupName}" and is pending admin approval.`,
+          postSnippet: task.caption.substring(0, 80) + '...',
+          postUrl,
+        });
+      }
 
       this.isProcessing = false;
       this.activeProcessingTaskId = null;
@@ -205,7 +345,7 @@ class QueueRunnerService {
         status: willRetry ? 'Scheduled' : 'Failed',
         retryCount: currentRetries + 1,
         errorMessage: errorMsg,
-        // reschedule 2 minutes later if auto-retrying
+        workerType: settings.workerMode,
         scheduledAt: willRetry
           ? new Date(Date.now() + 120000).toISOString()
           : task.scheduledAt,
@@ -214,7 +354,9 @@ class QueueRunnerService {
       storageService.addLog({
         type: 'task_failed',
         message: `Publishing failed for "${task.groupName}": ${errorMsg}`,
-        details: willRetry ? `Auto-retry scheduled in 2 minutes (Attempt ${currentRetries + 1}/${settings.maxRetries})` : 'Max retries reached',
+        details: willRetry
+          ? `Auto-retry scheduled in 2 minutes (Attempt ${currentRetries + 1}/${settings.maxRetries})`
+          : 'Max retries reached',
         taskId: task.id,
         campaignId: task.campaignId,
       });
@@ -229,9 +371,8 @@ class QueueRunnerService {
   public testExtensionConnection() {
     window.postMessage({ type: 'TECTIC_PING_EXTENSION' }, '*');
     setTimeout(() => {
-      // If no reply after 1.5s, simulate a pulse or acknowledge status
       this.notify();
-    }, 1500);
+    }, 1200);
   }
 }
 

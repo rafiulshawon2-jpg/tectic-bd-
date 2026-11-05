@@ -10,15 +10,22 @@ import {
   Settings,
   ShieldCheck,
   Radio,
+  UserCheck,
+  Bell,
+  Facebook,
+  Cpu,
 } from 'lucide-react';
-import { AppSettings } from '../types';
+import { AppSettings, MetaAccount } from '../types';
 
 export type ActiveTab =
   | 'dashboard'
+  | 'accounts'
   | 'groups'
   | 'composer'
   | 'campaigns'
   | 'queue'
+  | 'moderation'
+  | 'worker'
   | 'history'
   | 'extension'
   | 'settings';
@@ -30,6 +37,9 @@ interface SidebarProps {
   totalGroupsCount: number;
   isExtensionConnected: boolean;
   settings: AppSettings;
+  unreadNotificationsCount: number;
+  connectedAccountsCount: number;
+  defaultAccount?: MetaAccount;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -39,6 +49,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   totalGroupsCount,
   isExtensionConnected,
   settings,
+  unreadNotificationsCount,
+  connectedAccountsCount,
+  defaultAccount,
 }) => {
   const navItems = [
     {
@@ -46,6 +59,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Dashboard',
       icon: LayoutDashboard,
       badge: null,
+    },
+    {
+      id: 'accounts' as ActiveTab,
+      label: 'Meta Accounts (FB/IG)',
+      icon: UserCheck,
+      badge: connectedAccountsCount > 0 ? `${connectedAccountsCount} Connected` : 'Connect',
+      badgeAlert: connectedAccountsCount === 0,
     },
     {
       id: 'groups' as ActiveTab,
@@ -72,6 +92,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ListOrdered,
       badge: pendingCount > 0 ? String(pendingCount) : null,
       badgeAlert: pendingCount > 0,
+    },
+    {
+      id: 'moderation' as ActiveTab,
+      label: 'Post Status & Alerts',
+      icon: Bell,
+      badge: unreadNotificationsCount > 0 ? `${unreadNotificationsCount} New` : null,
+      badgeAlert: unreadNotificationsCount > 0,
+    },
+    {
+      id: 'worker' as ActiveTab,
+      label: 'Automation Workers',
+      icon: Cpu,
+      badge: settings.workerMode === 'local_windows' ? 'Windows' : settings.workerMode === 'cloud_vps' ? 'VPS' : 'Bridge',
     },
     {
       id: 'history' as ActiveTab,
@@ -158,6 +191,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </nav>
+
+      {/* Active Meta ID Quick Status */}
+      {defaultAccount && (
+        <div className="px-3 py-2 mx-3 mb-2 rounded-lg bg-blue-950/40 border border-blue-900/60 text-xs flex items-center gap-2.5">
+          <img
+            src={defaultAccount.avatarUrl}
+            alt={defaultAccount.name}
+            className="w-7 h-7 rounded-full object-cover border border-blue-400/30 shrink-0"
+          />
+          <div className="overflow-hidden min-w-0">
+            <div className="text-[11px] font-bold text-white truncate">
+              {defaultAccount.name}
+            </div>
+            <div className="text-[10px] text-blue-300 truncate">
+              Active Meta Publisher
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Extension Status Live Box */}
       <div className="p-3 mx-3 mb-3 rounded-lg bg-slate-900/90 border border-slate-800 text-xs">

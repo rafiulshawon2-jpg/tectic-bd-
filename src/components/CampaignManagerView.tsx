@@ -166,39 +166,55 @@ export const CampaignManagerView: React.FC<CampaignManagerViewProps> = ({
                     {camp.caption}
                   </p>
 
-                  {/* Metric Counts */}
-                  <div className="grid grid-cols-4 gap-2 pt-1 text-center">
-                    <div className="bg-slate-50 rounded-lg p-2 border border-slate-100">
+                  {/* 6-Metric Coverage Breakdown */}
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 pt-1 text-center">
+                    <div className="bg-slate-50 rounded-lg p-1.5 border border-slate-100">
                       <div className="text-xs font-bold text-slate-800 font-mono">
                         {camp.totalTasks}
                       </div>
-                      <div className="text-[10px] text-slate-500">Groups</div>
+                      <div className="text-[9px] text-slate-500 truncate">Total Groups</div>
                     </div>
-                    <div className="bg-emerald-50/50 rounded-lg p-2 border border-emerald-100/60">
+                    <div className="bg-emerald-50 rounded-lg p-1.5 border border-emerald-100">
                       <div className="text-xs font-bold text-emerald-700 font-mono">
                         {camp.completedTasks}
                       </div>
-                      <div className="text-[10px] text-emerald-600">Published</div>
+                      <div className="text-[9px] text-emerald-700 truncate font-semibold">Published</div>
                     </div>
-                    <div className="bg-blue-50/50 rounded-lg p-2 border border-blue-100/60">
-                      <div className="text-xs font-bold text-blue-700 font-mono">
-                        {camp.pendingTasks}
-                      </div>
-                      <div className="text-[10px] text-blue-600">Pending</div>
-                    </div>
-                    <div className="bg-rose-50/50 rounded-lg p-2 border border-rose-100/60">
+                    <div className="bg-rose-50 rounded-lg p-1.5 border border-rose-100">
                       <div className="text-xs font-bold text-rose-700 font-mono">
                         {camp.failedTasks}
                       </div>
-                      <div className="text-[10px] text-rose-600">Failed</div>
+                      <div className="text-[9px] text-rose-700 truncate font-semibold">Failed</div>
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-1.5 border border-purple-100">
+                      <div className="text-xs font-bold text-purple-700 font-mono">
+                        {camp.skippedTasks || 0}
+                      </div>
+                      <div className="text-[9px] text-purple-700 truncate font-semibold">Skipped</div>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-1.5 border border-blue-100">
+                      <div className="text-xs font-bold text-blue-700 font-mono">
+                        {camp.pendingTasks}
+                      </div>
+                      <div className="text-[9px] text-blue-700 truncate">Pending</div>
+                    </div>
+                    <div className="bg-amber-50 rounded-lg p-1.5 border border-amber-100">
+                      <div className="text-xs font-bold text-amber-700 font-mono">
+                        {camp.verificationRequiredTasks || 0}
+                      </div>
+                      <div className="text-[9px] text-amber-700 truncate font-semibold">Verify Req.</div>
                     </div>
                   </div>
 
-                  {/* Progress Bar */}
+                  {/* Progress & Accurate Success Rate */}
                   <div className="space-y-1 pt-1">
                     <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                      <span>Completion Rate</span>
-                      <span className="font-bold text-slate-800">{progress}%</span>
+                      <span>Execution Progress ({progress}%)</span>
+                      <span className="font-semibold text-emerald-700">
+                        Success Rate: {camp.completedTasks + camp.failedTasks > 0
+                          ? Math.round((camp.completedTasks / (camp.completedTasks + camp.failedTasks)) * 100)
+                          : 100}%
+                      </span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div

@@ -11,7 +11,7 @@ export class PublishingEngine {
 
     this.isBusy = true;
     this.activeTask = task;
-    console.log('[PublishingEngine] Starting publish sequence for group:', task.groupName);
+    console.log('[PublishingEngine] Publishing to group:', task.groupName, 'as Meta account:', task.metaAccountName);
 
     try {
       const tab = await chrome.tabs.create({
@@ -26,7 +26,8 @@ export class PublishingEngine {
           action: 'INJECT_POST',
           postData: {
             caption: task.caption,
-            mediaUrls: task.mediaUrls
+            mediaUrls: task.mediaUrls,
+            metaAccountId: task.metaAccountId
           }
         }, (res) => {
           resolve(res);
@@ -49,6 +50,28 @@ export class PublishingEngine {
       this.activeTask = null;
       console.error('[PublishingEngine] Publishing error:', err);
       return { success: false, error: err.message };
+    }
+  }
+
+  async checkFacebookNotifications() {
+    try {
+      const tab = await chrome.tabs.create({
+        url: 'https://www.facebook.com/notifications',
+        active: false
+      });
+      await this.waitForTabLoaded(tab.id);
+
+      const response = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(tab.id, { action: 'INSPECT_GROUP_NOTIFICATIONS' }, (res) => {
+          resolve(res);
+        });
+      });
+
+      chrome.tabs.remove(tab.id);
+      return response && response.notifications ? response.notifications : [];
+    } catch (e) {
+      console.warn('[PublishingEngine] Notification check warning:', e);
+      return [];
     }
   }
 

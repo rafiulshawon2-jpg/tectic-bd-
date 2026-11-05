@@ -22,10 +22,11 @@ import {
   UploadCloud,
   Check,
 } from 'lucide-react';
-import { FacebookGroup, MediaItem, AppSettings } from '../types';
+import { FacebookGroup, MediaItem, AppSettings, PrePublishReport } from '../types';
 import { storageService } from '../services/storage';
 import { generateAutoSchedules, formatDateTime } from '../utils/dateUtils';
 import { ActiveTab } from './Sidebar';
+import { PrePublishCheckModal } from './PrePublishCheckModal';
 
 interface PostComposerViewProps {
   groups: FacebookGroup[];
@@ -42,6 +43,12 @@ export const PostComposerView: React.FC<PostComposerViewProps> = ({
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
 
   // Step 1: Creative & Content
+  const accounts = storageService.getAccounts();
+  const [selectedMetaAccountId, setSelectedMetaAccountId] = useState<string>(
+    storageService.getDefaultAccount()?.id || accounts[0]?.id || 'meta-fb-01'
+  );
+  const activeAccount = accounts.find((a) => a.id === selectedMetaAccountId) || accounts[0];
+
   const [campaignName, setCampaignName] = useState(
     'TecTic Bd – Promotional Outreach ' + new Date().toLocaleDateString()
   );
@@ -111,6 +118,9 @@ Direct WhatsApp: +880 1700-000000 | contact@tecticbd.com
 
   // Form error
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Pre-Publish Check State & Modal
+  const [prePublishReport, setPrePublishReport] = useState<PrePublishReport | null>(null);
 
   // Common emoji palette for business copywriters
   const emojis = ['🚀', '🔥', '✨', '✅', '📲', '💼', '💡', '🌟', '🎯', '📈', '🤝', '🇧🇩'];
@@ -264,32 +274,55 @@ Direct WhatsApp: +880 1700-000000 | contact@tecticbd.com
     setCurrentStep(3);
   };
 
-  // Start Campaign Final Action
+  // Start Campaign: Triggers Pre-Publish Check first
   const handleStartCampaign = () => {
     if (selectedGroupIds.size === 0) {
       setValidationError('Please select target Facebook groups.');
       return;
     }
 
-    const { campaign } = storageService.createCampaign(
+    setValidationError(null);
+    const report = storageService.runPrePublishCheck(
+      Array.from(selectedGroupIds),
+      selectedMetaAccountId,
+      mediaList.length
+    );
+    setPrePublishReport(report);
+  };
+
+  const handleConfirmPrePublishLaunch = (eligibleGroupIds: string[]) => {
+    if (eligibleGroupIds.length === 0) {
+      setValidationError('No groups selected to launch.');
+      setPrePublishReport(null);
+      return;
+    }
+
+    // Filter schedules to only eligible groups selected in audit
+    const approvedSchedules = generatedTaskSchedules.filter((s) =>
+      eligibleGroupIds.includes(s.groupId)
+    );
+
+    storageService.createCampaign(
       {
         name: campaignName.trim(),
         caption: caption.trim(),
         media: mediaList,
-        groupIds: Array.from(selectedGroupIds),
+        groupIds: eligibleGroupIds,
         scheduleMode,
         autoIntervalMinutes:
           scheduleMode === 'automatic' ? autoIntervalMinutes : undefined,
         startDateTime: new Date(startDateTimeLocal).toISOString(),
         timezone: selectedTimezone,
         status: 'scheduled',
+        selectedMetaAccountId,
       },
-      generatedTaskSchedules.map((s) => ({
+      approvedSchedules.map((s) => ({
         groupId: s.groupId,
         scheduledAt: s.scheduledAt,
       }))
     );
 
+    setPrePublishReport(null);
     // Redirect to queue to watch execution live!
     onNavigate('queue');
   };
@@ -431,6 +464,40 @@ Direct WhatsApp: +880 1700-000000 | contact@tecticbd.com
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Form: Editor (7 cols) */}
           <div className="lg:col-span-7 bg-white rounded-xl p-6 border border-slate-200/80 shadow-sm space-y-5">
+            {/* Meta Account Publishing Identity */}
+            <div className="p-3.5 rounded-lg bg-blue-50/50 border border-blue-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <img
+                  src={activeAccount?.avatarUrl}
+                  alt={activeAccount?.name}
+                  className="w-8 h-8 rounded-full object-cover border border-blue-300 shrink-0"
+                />
+                <div>
+                  <div className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">
+                    Publishing Meta Identity
+                  </div>
+                  <div className="font-bold text-slate-900 truncate">
+                    {activeAccount?.name || 'Default Account'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedMetaAccountId}
+                  onChange={(e) => setSelectedMetaAccountId(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white border border-blue-300 rounded-md font-medium text-slate-800 focus:outline-none"
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.platform === 'facebook' ? 'Facebook: ' : 'Instagram: '}
+                      {a.name} ({a.accountType})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1.5 uppercase tracking-wider">
                 Campaign Name
@@ -627,12 +694,20 @@ Direct WhatsApp: +880 1700-000000 | contact@tecticbd.com
             <div className="p-4 space-y-3">
               {/* Group / Page Header */}
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[#111C2E] text-white flex items-center justify-center font-bold text-xs shrink-0">
-                  TB
-                </div>
+                <img
+                  src={
+                    activeAccount?.avatarUrl ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'
+                  }
+                  alt={activeAccount?.name}
+                  className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
+                />
                 <div>
-                  <div className="text-xs font-bold text-slate-900 hover:underline cursor-pointer">
-                    TecTic Bd Official · Promotion
+                  <div className="text-xs font-bold text-slate-900 hover:underline cursor-pointer flex items-center gap-1.5">
+                    <span>{activeAccount?.name || 'TecTic Bd Official'}</span>
+                    <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded font-normal">
+                      Author
+                    </span>
                   </div>
                   <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
                     <span>Just now</span>
@@ -1042,10 +1117,20 @@ Direct WhatsApp: +880 1700-000000 | contact@tecticbd.com
               className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all"
             >
               <Check className="w-4 h-4" />
-              <span>Start Campaign Now</span>
+              <span>Verify & Start Campaign</span>
             </button>
           </div>
         </div>
+      )}
+
+      {/* Pre-Publish Check Modal */}
+      {prePublishReport && (
+        <PrePublishCheckModal
+          report={prePublishReport}
+          onConfirm={handleConfirmPrePublishLaunch}
+          onCancel={() => setPrePublishReport(null)}
+          metaAccountName={activeAccount?.name}
+        />
       )}
     </div>
   );
